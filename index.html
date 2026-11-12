@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>The Hollow King</title>
+<meta name="description" content="A fantasy RPG where every fight is a match-3 duel. Plays in the browser.">
+<style>
+	html, body { margin: 0; height: 100%; background: #080a1c; overflow: hidden; touch-action: none; overscroll-behavior: none; }
+	#status { position: fixed; inset: 0; display: grid; place-items: center; color: #ece8f8; font: 20px monospace; text-align: center; }
+	canvas { touch-action: none; }
+</style>
+</head>
+<body>
+<div id="status">Loading…</div>
+<noscript><p style="color:#ece8f8;font:20px monospace;text-align:center">The game needs JavaScript and WebAssembly.</p></noscript>
+<script src="wasm_exec.js"></script>
+<script>
+	document.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+	document.addEventListener("gesturestart", function (e) { e.preventDefault(); });
+</script>
+<script>
+	const status = document.getElementById("status");
+	const go = new Go();
+	// The dev server serves the live map; elsewhere this is a 404 and the built-in map is used.
+	const mapYAML = fetch("assets/maps/world.yaml", { cache: "no-store" })
+		.then(r => r.ok ? r.text() : "")
+		.catch(() => "");
+
+	// Download the game with a progress readout; it is about 20 MB.
+	async function loadWasm() {
+		const res = await fetch("game.wasm");
+		if (!res.ok) throw new Error("game.wasm: " + res.status);
+		const total = +res.headers.get("Content-Length") || 0;
+		const reader = res.body.getReader();
+		const parts = [];
+		let got = 0;
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			parts.push(value);
+			got += value.length;
+			const mb = (got / 1048576).toFixed(1);
+			// a gzipped download reports its compressed size, so fall back to megabytes past it
+			status.textContent = total && got <= total
+				? `Loading… ${Math.floor(got * 100 / total)}%`
+				: `Loading… ${mb} MB`;
+		}
+		const bytes = new Uint8Array(got);
+		let at = 0;
+		for (const p of parts) { bytes.set(p, at); at += p.length; }
+		return WebAssembly.instantiate(bytes, go.importObject);
+	}
+
+	Promise.all([loadWasm(), mapYAML])
+		.then(([r, yaml]) => {
+			window.jewelMapYAML = yaml;
+			status.remove();
+			go.run(r.instance);
+		})
+		.catch(e => { status.textContent = "Could not start the game: " + e; });
+</script>
+</body>
+</html>
